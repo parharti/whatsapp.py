@@ -5,39 +5,44 @@ import os
 
 app = Flask(__name__)
 
-# Your chatbot backend/middleware endpoint
+# ✅ Your deployed middleware URL
 MIDDLEWARE_CHAT_URL = "https://server-py-ebxq.onrender.com/chat"
 
 @app.route("/webhook", methods=["POST"])
 def whatsapp_webhook():
-    incoming_msg = request.values.get('Body', '')
-    sender = request.values.get('From', '')
+    incoming_msg = request.values.get('Body', '').strip()
+    sender = request.values.get('From', '').replace("whatsapp:", "").strip()
 
     print(f"[WhatsApp] {sender} said: {incoming_msg}")
 
     try:
-        response = requests.post(MIDDLEWARE_CHAT_URL, json={"message": incoming_msg}, timeout=5)
-        print("Middleware status:", response.status_code)
-        print("Middleware response text:", response.text)
+        # ✅ Prepare payload exactly as server.py expects
+        payload = {
+            "message": incoming_msg,
+            "sender": sender
+        }
 
-        rasa_messages = response.json()
+        response = requests.post(MIDDLEWARE_CHAT_URL, json=payload, timeout=10)
+        print("[Middleware] Status:", response.status_code)
+        print("[Middleware] Raw response:", response.text)
 
-        if isinstance(rasa_messages, list) and rasa_messages:
-            bot_reply = rasa_messages[0].get("text", "Sorry, I couldn’t understand that.")
-        elif isinstance(rasa_messages, dict) and "reply" in rasa_messages:
-            bot_reply = rasa_messages["reply"]
+        rasa_response = response.json()
+
+        # ✅ Extract message from standard Rasa REST response
+        if isinstance(rasa_response, list) and rasa_response:
+            messages = [msg.get("text") for msg in rasa_response if "text" in msg]
+            bot_reply = "\n".join(messages) if messages else "I didn’t get a reply from the bot."
         else:
-            bot_reply = "Sorry, I couldn’t understand that."
-        
+            bot_reply = "I didn’t get a valid response from the bot."
+
     except Exception as e:
-        print("Error talking to chatbot middleware:", e)
-        bot_reply = "Sorry, something went wrong."
+        print("[Error] Chatbot middleware failed:", e)
+        bot_reply = "Oops! Something went wrong talking to the bot."
 
     twilio_response = MessagingResponse()
     twilio_response.message(bot_reply)
     return str(twilio_response)
 
-# ✅ Make sure this runs only when executed directly (not on import)
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
